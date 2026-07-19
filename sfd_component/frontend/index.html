@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SFD Canvas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<style>
+  :root {
+    --stock:  #2563eb;   /* blue   */
+    --flow:   #059669;   /* green  */
+    --aux:    #d97706;   /* amber  */
+    --cloud:  #94a3b8;   /* grey   */
+    --conn:   #6b7280;   /* grey info arrow */
+    --ink:    #1e293b;
+    --paper:  #fbfaf7;
+    --line:   #d8d4cc;
+  }
+  html, body { margin: 0; padding: 0; font-family: Georgia, 'Times New Roman', serif; }
+  #toolbar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 8px 10px; background: #f3f1ec;
+    border: 1px solid var(--line); border-bottom: none;
+    font-size: 13px; color: var(--ink);
+  }
+  .tool {
+    font-family: inherit; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    padding: 5px 9px; border-radius: 2px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .tool .swatch {
+    width: 11px; height: 11px; border-radius: 2px; display: inline-block;
+    border: 1px solid rgba(0,0,0,.25);
+  }
+  .tool.active { border-color: var(--ink); border-width: 2px; font-weight: bold;
+                 background: #fffdf8; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .act {
+    font-family: inherit; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--ink); background: #fff; color: var(--ink);
+    padding: 5px 11px; border-radius: 2px;
+  }
+  .act.primary { background: var(--ink); color: #fff; }
+  .act:active, .tool:active { transform: translateY(1px); }
+  #cy {
+    width: 100%; height: 430px; background: var(--paper);
+    background-image: radial-gradient(var(--line) 0.8px, transparent 0.8px);
+    background-size: 22px 22px;
+    border: 1px solid var(--line); box-sizing: border-box;
+  }
+  #status { font-size: 12px; color: #767067; padding: 5px 10px;
+            border: 1px solid var(--line); border-top: none; min-height: 1.1em;
+            background: #f3f1ec; font-style: italic; }
+  #footer {
+    display: flex; justify-content: flex-end;
+    padding: 8px 10px; background: #f3f1ec;
+    border: 1px solid var(--line); border-top: none;
+  }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <button class="tool active" data-tool="stock">
+      <span class="swatch" style="background:#2563eb"></span>Stock</button>
+    <button class="tool" data-tool="aux">
+      <span class="swatch" style="background:#d97706;border-radius:50%"></span>Auxiliary</button>
+    <button class="tool" data-tool="cloud">
+      <span class="swatch" style="background:#94a3b8"></span>Cloud</button>
+    <span class="sep"></span>
+    <button class="tool" data-tool="flow">
+      <span class="swatch" style="background:#059669"></span>Flow</button>
+    <button class="tool" data-tool="connector">
+      <span class="swatch" style="background:#6b7280"></span>Connector</button>
+    <span class="sep"></span>
+    <button class="act" id="clearBtn">Clear</button>
+  </div>
+  <div id="cy"></div>
+  <div id="status">Stock tool active — click the canvas to place a stock.</div>
+  <div id="footer">
+    <button class="act primary" id="submitBtn">Submit diagram</button>
+  </div>
+
+<script>
+/* ====================================================================
+   Streamlit component protocol (vanilla, no build step)
+   ==================================================================== */
+const Streamlit = {
+  _renderHandler: null,
+  setComponentReady() {
+    window.parent.postMessage(
+      { isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
+  },
+  setFrameHeight(h) {
+    window.parent.postMessage(
+      { isStreamlitMessage: true, type: "streamlit:setFrameHeight",
+        height: h || document.body.scrollHeight }, "*");
+  },
+  setComponentValue(v) {
+    window.parent.postMessage(
+      { isStreamlitMessage: true, type: "streamlit:setComponentValue", value: v }, "*");
+  },
+  onRender(fn) { this._renderHandler = fn; }
+};
+window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "streamlit:render" && Streamlit._renderHandler) {
+    Streamlit._renderHandler(e.data.args || {});
+  }
+});
+
+const C = {
+  stock: "#2563eb", flow: "#059669", aux: "#d97706",
+  cloud: "#94a3b8", conn: "#6b7280"
+};
+
+/* ====================================================================
+   Cytoscape editor — typed SFD elements
+   ==================================================================== */
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  minZoom: 0.4, maxZoom: 2.5,
+  style: [
+    /* --- STOCK : blue rectangle --------------------------------------- */
+    { selector: 'node[type="stock"]', style: {
+        'label': 'data(label)', 'shape': 'rectangle',
+        'background-color': '#eef3ff', 'border-color': C.stock,
+        'border-width': 2.5,
+        'width': 96, 'height': 46,
+        'text-valign': 'center', 'text-halign': 'center',
+        'font-family': 'Georgia, serif', 'font-size': 12,
+        'color': '#1e3a8a', 'text-wrap': 'wrap', 'text-max-width': 88
+    }},
+    /* --- AUXILIARY : amber circle ------------------------------------- */
+    { selector: 'node[type="aux"]', style: {
+        'label': 'data(label)', 'shape': 'ellipse',
+        'background-color': '#fef3e2', 'border-color': C.aux,
+        'border-width': 2,
+        'width': 62, 'height': 62,
+        'text-valign': 'center', 'text-halign': 'center',
+        'font-family': 'Georgia, serif', 'font-size': 11,
+        'color': '#92400e', 'text-wrap': 'wrap', 'text-max-width': 56
+    }},
+    /* --- CLOUD : grey rounded boundary marker ------------------------- */
+    { selector: 'node[type="cloud"]', style: {
+        'label': 'data(label)', 'shape': 'round-rectangle',
+        'background-color': '#eef0f2', 'border-color': C.cloud,
+        'border-width': 2, 'border-style': 'dashed',
+        'width': 58, 'height': 38,
+        'text-valign': 'center', 'text-halign': 'center',
+        'font-family': 'Georgia, serif', 'font-size': 10,
+        'color': '#475569', 'font-style': 'italic'
+    }},
+    /* --- selected highlight ------------------------------------------- */
+    { selector: 'node:selected', style: {
+        'border-width': 4, 'overlay-color': '#1e293b', 'overlay-opacity': 0.06
+    }},
+    /* --- FLOW : two thick green pipe segments meeting at a valve node - */
+    { selector: 'edge[type="flowseg"]', style: {
+        'curve-style': 'bezier',
+        'width': 7,
+        'line-color': C.flow, 'line-style': 'double',
+        'target-arrow-color': C.flow,
+        'target-arrow-shape': 'data(arrow)',   /* 'triangle' or 'none' */
+        'arrow-scale': 1.6
+    }},
+    /* the VALVE : the small symbol sitting on the flow pipe ------------- */
+    { selector: 'node[type="valve"]', style: {
+        'label': 'data(label)', 'shape': 'diamond',
+        'background-color': '#fffdf8', 'border-color': C.flow,
+        'border-width': 2.5,
+        'width': 22, 'height': 22,
+        'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -3,
+        'font-family': 'Georgia, serif', 'font-size': 11, 'font-weight': 'bold',
+        'color': '#065f46',
+        'text-background-color': '#fbfaf7',
+        'text-background-opacity': 1, 'text-background-padding': 2
+    }},
+    /* --- CONNECTOR : thin grey curved information arrow --------------- */
+    { selector: 'edge[type="connector"]', style: {
+        'curve-style': 'unbundled-bezier',
+        'control-point-distances': [38], 'control-point-weights': [0.5],
+        'width': 1.6,
+        'line-color': C.conn, 'line-style': 'solid',
+        'target-arrow-color': C.conn, 'target-arrow-shape': 'vee',
+        'arrow-scale': 1.0
+    }},
+    { selector: 'edge:selected', style: { 'overlay-color': '#1e293b',
+        'overlay-opacity': 0.12, 'overlay-padding': 4 }},
+    /* hover glow — signals "this element is clickable".
+       Border + width changes always render, unlike overlay-*. */
+    { selector: 'node.hovered', style: {
+        'border-width': 5, 'border-color': '#1e293b' }},
+    { selector: 'edge[type="flowseg"].hovered', style: {
+        'width': 10, 'line-color': '#065f46' }},
+    { selector: 'edge[type="connector"].hovered', style: {
+        'width': 3.5, 'line-color': '#1e293b',
+        'target-arrow-color': '#1e293b' }}
+  ],
+  layout: { name: 'preset' }
+});
+
+/* --- tool state ------------------------------------------------------- */
+let tool = 'stock';
+const TOOL_HINT = {
+  stock:     'Stock tool — click the canvas to place a stock.',
+  aux:       'Auxiliary tool — click the canvas to place an auxiliary.',
+  cloud:     'Cloud tool — click the canvas to place a boundary cloud.',
+  flow:      'Flow tool — click a source element, then a target, to draw a flow.',
+  connector: 'Connector tool — click a source, then a target, to draw an info link.'
+};
+document.querySelectorAll('.tool').forEach(btn => {
+  btn.onclick = () => {
+    tool = btn.dataset.tool;
+    document.querySelectorAll('.tool').forEach(b =>
+      b.classList.toggle('active', b === btn));
+    linkSource = null; cy.elements().unselect();
+    flash(TOOL_HINT[tool]);
+  };
+});
+
+let seq = 0;
+const newId = () => 'x' + (++seq);
+
+/* --- click empty canvas: place a node-type element ------------------- */
+cy.on('tap', (evt) => {
+  if (evt.target !== cy) return;            // only background clicks
+  if (tool === 'flow' || tool === 'connector') {
+    flash('That tool draws arrows — click an element, not empty space.');
+    return;
+  }
+  let label;
+  if (tool === 'cloud') {
+    label = 'cloud';                        // clouds need no name
+  } else {
+    label = window.prompt(
+      tool === 'stock' ? 'Stock name:' : 'Auxiliary name:');
+    if (!label || !label.trim()) return;
+    label = label.trim();
+  }
+  cy.add({ group: 'nodes',
+           data: { id: newId(), label: label, type: tool },
+           position: { x: evt.position.x, y: evt.position.y } });
+  flash('Added ' + tool + (tool === 'cloud' ? '' : ' "' + label + '"'));
+});
+
+/* --- flow construction: source --[seg]--> valve --[seg]--> target ----- */
+/* A flow is a valve node plus two pipe segments sharing a `flow` id.     */
+/* This lets connectors attach to the valve, exactly as in real SFD tools.*/
+let flowSeq = 0;
+
+function makeFlow(srcNode, tgtNode, label) {
+  const fid = 'flow' + (++flowSeq);
+  // valve sits at the midpoint of the two endpoints
+  const vx = (srcNode.position('x') + tgtNode.position('x')) / 2;
+  const vy = (srcNode.position('y') + tgtNode.position('y')) / 2;
+  const valveId = newId();
+  cy.add({ group: 'nodes',
+           data: { id: valveId, type: 'valve', label: label, flow: fid },
+           position: { x: vx, y: vy } });
+  // segment 1: source -> valve, no arrowhead
+  cy.add({ group: 'edges', data: {
+    id: 'e' + newId(), source: srcNode.id(), target: valveId,
+    type: 'flowseg', flow: fid, arrow: 'none' } });
+  // segment 2: valve -> target, carries the arrowhead
+  cy.add({ group: 'edges', data: {
+    id: 'e' + newId(), source: valveId, target: tgtNode.id(),
+    type: 'flowseg', flow: fid, arrow: 'triangle' } });
+}
+
+/* removing any part of a flow removes the whole flow ------------------- */
+function removeFlow(fid) {
+  cy.elements(`[flow = "${fid}"]`).remove();
+}
+
+/* --- click two elements: draw a flow or a connector ------------------ */
+let linkSource = null;
+cy.on('tap', 'node', (evt) => {
+  if (tool !== 'flow' && tool !== 'connector') return;   // selection only
+  const node = evt.target;
+
+  // A flow must run between stocks/clouds (or a valve isn't a sensible
+  // flow endpoint) — but we impose no hard restriction; we only skip
+  // using a valve as a *flow* endpoint, which would be meaningless.
+  if (linkSource === null) {
+    linkSource = node; node.select();
+    flash(tool + ' from "' + node.data('label') + '" — click the target.');
+  } else if (linkSource.id() === node.id()) {
+    linkSource.unselect(); linkSource = null;
+    flash(tool + ' cancelled.');
+  } else {
+    if (tool === 'flow') {
+      const fl = window.prompt('Flow name:');
+      makeFlow(linkSource, node, (fl && fl.trim()) ? fl.trim() : 'flow');
+    } else {
+      cy.add({ group: 'edges', data: {
+        id: 'e' + newId(), source: linkSource.id(), target: node.id(),
+        type: 'connector' } });
+    }
+    flash(tool + ' drawn: "' + linkSource.data('label') +
+          '" \u2192 "' + node.data('label') + '"');
+    linkSource.unselect(); linkSource = null;
+  }
+});
+
+/* --- double-click a node to rename ----------------------------------- */
+cy.on('dbltap', 'node', (evt) => {
+  const n = evt.target;
+  if (n.data('type') === 'cloud') return;
+  const what = n.data('type') === 'valve' ? 'Rename flow:' : 'Rename:';
+  const name = window.prompt(what, n.data('label'));
+  if (name && name.trim()) n.data('label', name.trim());
+});
+
+/* --- right-click deletes ---------------------------------------------- */
+/* Deleting a valve or a pipe segment removes the entire flow.           */
+cy.on('cxttap', 'node', (evt) => {
+  const n = evt.target;
+  if (n.data('type') === 'valve') removeFlow(n.data('flow'));
+  else n.remove();
+});
+cy.on('cxttap', 'edge', (evt) => {
+  const e = evt.target;
+  if (e.data('type') === 'flowseg') removeFlow(e.data('flow'));
+  else e.remove();
+});
+
+/* --- hover glow: highlight the element under the cursor -------------- */
+/* Makes it clear when a click lands ON an element (select it / link it) */
+/* versus on empty canvas (place a new element).                         */
+cy.on('mouseover', 'node', (evt) => {
+  evt.target.addClass('hovered');
+  cy.container().style.cursor = 'pointer';
+});
+cy.on('mouseout', 'node', (evt) => {
+  evt.target.removeClass('hovered');
+  cy.container().style.cursor = 'default';
+});
+cy.on('mouseover', 'edge', (evt) => {
+  evt.target.addClass('hovered');
+  cy.container().style.cursor = 'pointer';
+});
+cy.on('mouseout', 'edge', (evt) => {
+  evt.target.removeClass('hovered');
+  cy.container().style.cursor = 'default';
+});
+
+/* --- toolbar actions -------------------------------------------------- */
+document.getElementById('clearBtn').onclick = () => {
+  if (window.confirm('Clear the whole diagram?')) {
+    cy.elements().remove(); linkSource = null; flash('Cleared.');
+  }
+};
+document.getElementById('submitBtn').onclick = () => {
+  Streamlit.setComponentValue(serialize());
+  flash('Diagram submitted \u2014 generating feedback\u2026');
+};
+
+/* --- serialise to typed JSON ----------------------------------------- */
+function serialize() {
+  // label for any node; for a valve, its label IS the flow name
+  const labelOf = id => {
+    const n = cy.getElementById(id);
+    return n.nonempty() ? n.data('label') : null;
+  };
+  const out = { submitted_at: Date.now(),
+                stocks: [], auxiliaries: [], clouds: [],
+                flows: [], connectors: [] };
+
+  // plain element nodes
+  cy.nodes().forEach(n => {
+    const t = n.data('type');
+    if (t === 'valve') return;                 // valves handled via flows
+    const rec = { label: n.data('label'),
+                  x: Math.round(n.position('x')),
+                  y: Math.round(n.position('y')) };
+    if (t === 'stock')      out.stocks.push(rec);
+    else if (t === 'aux')   out.auxiliaries.push(rec);
+    else if (t === 'cloud') out.clouds.push(rec);
+  });
+
+  // reconstruct each flow from its valve + two pipe segments
+  cy.nodes('[type = "valve"]').forEach(valve => {
+    const fid = valve.data('flow');
+    const segs = cy.edges(`[flow = "${fid}"]`);
+    let from = null, to = null;
+    segs.forEach(seg => {
+      // the segment ending AT the valve gives the flow source;
+      // the segment starting FROM the valve gives the flow target
+      if (seg.data('target') === valve.id())
+        from = labelOf(seg.data('source'));
+      if (seg.data('source') === valve.id())
+        to = labelOf(seg.data('target'));
+    });
+    out.flows.push({ label: valve.data('label'), from: from, to: to });
+  });
+
+  // connectors — a valve target resolves to that flow's name
+  cy.edges('[type = "connector"]').forEach(e => {
+    out.connectors.push({ from: labelOf(e.data('source')),
+                          to:   labelOf(e.data('target')) });
+  });
+  return out;
+}
+
+/* --- load a pre-existing diagram (optional) -------------------------- */
+function loadDiagram(d) {
+  cy.elements().remove();
+  const idmap = {};        // element label -> node id
+  const valveOf = {};      // flow label    -> valve node id
+
+  const addNode = (rec, type) => {
+    const id = newId();
+    idmap[rec.label] = id;
+    cy.add({ group:'nodes',
+             data:{ id:id, label:rec.label, type:type },
+             position:{ x:rec.x||120, y:rec.y||120 } });
+  };
+  (d.stocks || []).forEach(r => addNode(r, 'stock'));
+  (d.auxiliaries || []).forEach(r => addNode(r, 'aux'));
+  (d.clouds || []).forEach(r => addNode(r, 'cloud'));
+
+  // rebuild each flow as a valve node plus two pipe segments
+  (d.flows || []).forEach(f => {
+    const s = idmap[f.from], t = idmap[f.to];
+    if (!s || !t) return;
+    makeFlow(cy.getElementById(s), cy.getElementById(t),
+             f.label || 'flow');
+    // the valve just created is the last valve node added
+    const valve = cy.nodes('[type = "valve"]').last();
+    valveOf[f.label] = valve.id();
+    idmap[f.label] = valve.id();   // so a connector can target the flow
+  });
+
+  // connectors — endpoints may be element labels or flow (valve) labels
+  (d.connectors || []).forEach(c => {
+    const s = idmap[c.from], t = idmap[c.to];
+    if (s && t) cy.add({ group:'edges', data:{
+      id:'e'+newId(), source:s, target:t, type:'connector' } });
+  });
+}
+
+/* --- status line ----------------------------------------------------- */
+let flashTimer = null;
+function flash(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+/* --- render handler -------------------------------------------------- */
+let loadedOnce = false;
+Streamlit.onRender((args) => {
+  if (!loadedOnce && args && args.initial &&
+      ((args.initial.stocks || []).length ||
+       (args.initial.auxiliaries || []).length)) {
+    loadDiagram(args.initial);
+  }
+  loadedOnce = true;
+  Streamlit.setFrameHeight();
+});
+
+Streamlit.setComponentReady();
+Streamlit.setFrameHeight(500);
+window.addEventListener('resize', () => Streamlit.setFrameHeight());
+</script>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Diagram Viewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<style>
+  :root {
+    --pos:#2563eb; --neg:#dc2626;
+    --stock:#2563eb; --flow:#059669; --aux:#d97706;
+    --cloud:#94a3b8; --conn:#6b7280;
+    --line:#d8d4cc; --paper:#fbfaf7;
+  }
+  html, body { margin:0; padding:0; font-family:Georgia,'Times New Roman',serif; }
+  #cy {
+    width:100%; height:430px; background:var(--paper);
+    background-image: radial-gradient(var(--line) 0.8px, transparent 0.8px);
+    background-size:22px 22px;
+    border:1px solid var(--line); box-sizing:border-box;
+  }
+  #empty {
+    height:430px; display:flex; align-items:center; justify-content:center;
+    border:1px solid var(--line); background:var(--paper);
+    color:#767067; font-style:italic; font-size:13px; text-align:center;
+    padding:0 24px; box-sizing:border-box;
+  }
+</style>
+</head>
+<body>
+  <div id="cy"></div>
+  <div id="empty" style="display:none"></div>
+
+<script>
+/* --- Streamlit protocol (vanilla) ------------------------------------ */
+const Streamlit = {
+  _h:null,
+  ready(){ window.parent.postMessage(
+    {isStreamlitMessage:true,type:"streamlit:componentReady",apiVersion:1},"*"); },
+  height(h){ window.parent.postMessage(
+    {isStreamlitMessage:true,type:"streamlit:setFrameHeight",
+     height:h||document.body.scrollHeight},"*"); },
+  onRender(fn){ this._h=fn; }
+};
+window.addEventListener("message",(e)=>{
+  if(e.data && e.data.type==="streamlit:render" && Streamlit._h)
+    Streamlit._h(e.data.args||{});
+});
+
+const POS="#2563eb", NEG="#dc2626";
+const C={stock:"#2563eb",flow:"#059669",aux:"#d97706",cloud:"#94a3b8",conn:"#6b7280"};
+
+const STYLE = [
+  /* CLD variable */
+  { selector:'node[group="cld"]', style:{
+      'label':'data(label)','shape':'round-rectangle',
+      'background-color':'#fffdf8','border-color':'#1e293b','border-width':1.5,
+      'width':'label','height':'label','padding':'12px',
+      'text-valign':'center','text-halign':'center',
+      'font-family':'Georgia, serif','font-size':12,
+      'color':'#1e293b','text-wrap':'wrap','text-max-width':120 }},
+  { selector:'edge[group="cld"]', style:{
+      'curve-style':'unbundled-bezier',
+      'control-point-distances':[42],'control-point-weights':[0.5],
+      'width':2.2,'line-color':'data(color)',
+      'target-arrow-color':'data(color)','target-arrow-shape':'triangle',
+      'arrow-scale':1.2,'label':'data(sign)',
+      'font-family':'Georgia, serif','font-size':16,'font-weight':'bold',
+      'color':'data(color)','text-background-color':'#fbfaf7',
+      'text-background-opacity':1,'text-background-padding':2 }},
+  /* SFD stock */
+  { selector:'node[type="stock"]', style:{
+      'label':'data(label)','shape':'rectangle',
+      'background-color':'#eef3ff','border-color':C.stock,'border-width':2.5,
+      'width':96,'height':46,'text-valign':'center','text-halign':'center',
+      'font-family':'Georgia, serif','font-size':12,
+      'color':'#1e3a8a','text-wrap':'wrap','text-max-width':88 }},
+  { selector:'node[type="aux"]', style:{
+      'label':'data(label)','shape':'ellipse',
+      'background-color':'#fef3e2','border-color':C.aux,'border-width':2,
+      'width':62,'height':62,'text-valign':'center','text-halign':'center',
+      'font-family':'Georgia, serif','font-size':11,
+      'color':'#92400e','text-wrap':'wrap','text-max-width':56 }},
+  { selector:'node[type="cloud"]', style:{
+      'label':'data(label)','shape':'round-rectangle',
+      'background-color':'#eef0f2','border-color':C.cloud,
+      'border-width':2,'border-style':'dashed',
+      'width':58,'height':38,'text-valign':'center','text-halign':'center',
+      'font-family':'Georgia, serif','font-size':10,
+      'color':'#475569','font-style':'italic' }},
+  { selector:'edge[type="flowseg"]', style:{
+      'curve-style':'bezier','width':7,
+      'line-color':C.flow,'line-style':'double',
+      'target-arrow-color':C.flow,
+      'target-arrow-shape':'data(arrow)','arrow-scale':1.6 }},
+  { selector:'node[type="valve"]', style:{
+      'label':'data(label)','shape':'diamond',
+      'background-color':'#fffdf8','border-color':C.flow,'border-width':2.5,
+      'width':22,'height':22,
+      'text-valign':'top','text-halign':'center','text-margin-y':-3,
+      'font-family':'Georgia, serif','font-size':11,'font-weight':'bold',
+      'color':'#065f46','text-background-color':'#fbfaf7',
+      'text-background-opacity':1,'text-background-padding':2 }},
+  { selector:'edge[type="connector"]', style:{
+      'curve-style':'unbundled-bezier',
+      'control-point-distances':[38],'control-point-weights':[0.5],
+      'width':1.6,'line-color':C.conn,
+      'target-arrow-color':C.conn,'target-arrow-shape':'vee','arrow-scale':1.0 }},
+  /* hover glow — signals a node can be grabbed and moved.
+     Border change always renders, unlike overlay-*. */
+  { selector:'node.hovered', style:{
+      'border-width':5,'border-color':'#1e293b' }}
+];
+
+let cy = null;
+
+function showEmpty(msg){
+  document.getElementById('cy').style.display='none';
+  const e=document.getElementById('empty');
+  e.style.display='flex'; e.textContent=msg;
+  Streamlit.height();
+}
+
+function buildCld(d){
+  const els=[]; let i=0; const idmap={};
+  (d.nodes||[]).forEach(n=>{
+    const id='n'+(i++); idmap[n.label]=id;
+    els.push({group:'nodes',data:{id:id,label:n.label,group:'cld'}});
+  });
+  (d.edges||[]).forEach(e=>{
+    const s=idmap[e.from], t=idmap[e.to];
+    if(s&&t) els.push({group:'edges',data:{
+      id:'e'+(i++),source:s,target:t,group:'cld',
+      sign:e.polarity==='-'?'\u2212':'+',
+      color:e.polarity==='-'?NEG:POS }});
+  });
+  return els;
+}
+
+function buildSfd(d){
+  const els=[]; let i=0; const idmap={};
+  const addN=(rec,type)=>{
+    const id='n'+(i++); idmap[rec.label]=id;
+    els.push({group:'nodes',data:{id:id,label:rec.label,type:type}});
+  };
+  (d.stocks||[]).forEach(r=>addN(r,'stock'));
+  (d.auxiliaries||[]).forEach(r=>addN(r,'aux'));
+  (d.clouds||[]).forEach(r=>addN(r,'cloud'));
+  // each flow = a valve node + two pipe segments
+  (d.flows||[]).forEach(f=>{
+    const s=idmap[f.from], t=idmap[f.to];
+    if(!s||!t) return;
+    const fid='flow'+(i++);
+    const valveId='n'+(i++);
+    idmap[f.label]=valveId;          // connectors may target the flow
+    els.push({group:'nodes',data:{
+      id:valveId,type:'valve',label:f.label||'flow',flow:fid}});
+    els.push({group:'edges',data:{
+      id:'e'+(i++),source:s,target:valveId,
+      type:'flowseg',flow:fid,arrow:'none'}});
+    els.push({group:'edges',data:{
+      id:'e'+(i++),source:valveId,target:t,
+      type:'flowseg',flow:fid,arrow:'triangle'}});
+  });
+  (d.connectors||[]).forEach(c=>{
+    const s=idmap[c.from], t=idmap[c.to];
+    if(s&&t) els.push({group:'edges',data:{
+      id:'e'+(i++),source:s,target:t,type:'connector'}});
+  });
+  return els;
+}
+
+function render(diagram, kind){
+  const els = (kind==='sfd') ? buildSfd(diagram) : buildCld(diagram);
+  if(els.length===0){ showEmpty('No diagram to display.'); return; }
+  document.getElementById('empty').style.display='none';
+  document.getElementById('cy').style.display='block';
+  cy = cytoscape({
+    container:document.getElementById('cy'),
+    elements:els, style:STYLE,
+    layout:{ name:'cose', animate:false, padding:30,
+             nodeRepulsion:9000, idealEdgeLength:110 },
+    userZoomingEnabled:true, userPanningEnabled:true,
+    boxSelectionEnabled:false, autoungrabify:false,
+    /* nodes can be dragged to tidy the layout; edges/elements cannot be
+       added or removed — there are no add/delete handlers in this viewer */
+    autounselectify:true
+  });
+  cy.ready(()=>{ cy.fit(undefined,30); });
+
+  /* hover glow — shows the node under the cursor can be dragged */
+  cy.on('mouseover','node',(evt)=>{
+    evt.target.addClass('hovered');
+    cy.container().style.cursor='grab';
+  });
+  cy.on('mouseout','node',(evt)=>{
+    evt.target.removeClass('hovered');
+    cy.container().style.cursor='default';
+  });
+  cy.on('grab','node',()=>{ cy.container().style.cursor='grabbing'; });
+  cy.on('free','node',()=>{ cy.container().style.cursor='grab'; });
+  Streamlit.height();
+}
+
+Streamlit.onRender((args)=>{
+  if(cy){ cy.destroy(); cy=null; }
+  const d = (args && args.diagram) || {};
+  const kind = (args && args.kind) || 'cld';
+  if(d._error){ showEmpty(d._error); }
+  else { render(d, kind); }
+});
+
+Streamlit.ready();
+Streamlit.height(440);
+window.addEventListener('resize',()=>Streamlit.height());
+</script>
+</body>
+</html>

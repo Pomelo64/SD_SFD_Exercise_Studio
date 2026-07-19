@@ -1,0 +1,94 @@
+[
+  {
+    "id": "sfd1_bathtub",
+    "type": "sfd",
+    "title": "1 \u00b7 The Bathtub",
+    "difficulty": "Level 1 \u00b7 Warm-up",
+    "scenario": "A bathtub is being filled from the tap while the drain is open. Water pours in at some rate and drains out at another. When inflow exceeds outflow the water level rises; when outflow exceeds inflow it falls.\n\nDraw this as a Stock and Flow Diagram \u2014 the simplest one there is. Decide what accumulates (that is your stock), add one inflow and one outflow, and mark the model boundary with clouds. No auxiliaries or connectors are needed here.",
+    "expected_concepts": [
+      "The STOCK is the Water in the tub (the accumulation).",
+      "Filling (tap flow) is an INFLOW: it runs from a CLOUD into the Water stock.",
+      "Draining is an OUTFLOW: it runs from the Water stock to a CLOUD.",
+      "Clouds mark the boundary \u2014 where the water comes from and goes to is outside the model.",
+      "No auxiliaries or connectors are required in this exercise.",
+      "The core lesson: a stock can ONLY change through its flows. Drawing the water level as an auxiliary circle, or the tap as a connector, is the classic type error."
+    ]
+  },
+  {
+    "id": "sfd2_coffee",
+    "type": "sfd",
+    "title": "2 \u00b7 The Coffee Cup",
+    "difficulty": "Level 2 \u00b7 Basic",
+    "scenario": "A hot cup of coffee cools on a desk. The coffee holds a quantity of heat. Heat continuously leaves the coffee into the surrounding air; the rate of heat loss depends on how far the coffee's temperature is above room temperature. As heat drains away, the coffee cools, and eventually it reaches room temperature.\n\nDecide what is actually accumulating here \u2014 that is your stock. Add the outflow, the auxiliaries that set its rate (room temperature, the temperature gap), the boundary cloud, and the information connectors. There is no inflow in this system. This is your first diagram where information connectors close a feedback loop.",
+    "expected_concepts": [
+      "The STOCK is the Heat in the coffee (or coffee temperature treated as the accumulation).",
+      "There is a single OUTFLOW: Heat loss, running from the Heat stock to a CLOUD (the surrounding air, outside the boundary).",
+      "There is NO inflow \u2014 nothing is reheating the coffee.",
+      "Room temperature and the Temperature gap are AUXILIARIES.",
+      "INFORMATION CONNECTORS should run from the Heat stock and Room temperature into the gap, and from the gap into the Heat loss flow \u2014 these connectors close the balancing feedback loop.",
+      "Heat is a stock, not an auxiliary; Heat loss is a flow (a rate), not a stock or an auxiliary \u2014 drawing the temperature as a plain auxiliary circle is the classic error here."
+    ]
+  },
+  {
+    "id": "sfd3_population",
+    "type": "sfd",
+    "title": "3 \u00b7 Rabbit Population",
+    "difficulty": "Level 3 \u00b7 Developing",
+    "scenario": "A rabbit population grows through births and shrinks through deaths. The number of births each period depends on the current population and a birth rate; deaths depend on the population and a death rate.\n\nDraw the Stock and Flow Diagram. Include the stock, BOTH flows (this is your first diagram with an inflow and an outflow on the same stock), the auxiliaries (the two rate constants), the boundary clouds, and the information connectors that show what each flow depends on.",
+    "expected_concepts": [
+      "The STOCK is Population.",
+      "Births is an inflow (from a cloud into Population); Deaths is an outflow (from Population to a cloud).",
+      "Birth rate and Death rate are AUXILIARIES (converters), shown as circles.",
+      "INFORMATION CONNECTORS should run: Population -> Births, Birth rate -> Births, Population -> Deaths, Death rate -> Deaths.",
+      "The Population -> Births connector closes a reinforcing loop; Population -> Deaths closes a balancing loop.",
+      "A flow must move material between a stock and a cloud (or another stock); connectors carry information only and must not be used in place of a flow.",
+      "Births/Deaths are flows, not auxiliaries; Population is a stock, not an auxiliary."
+    ]
+  },
+  {
+    "id": "sfd4_thermostat",
+    "type": "sfd",
+    "title": "4 \u00b7 Room Thermostat",
+    "difficulty": "Level 4 \u00b7 Intermediate",
+    "scenario": "A thermostat keeps a room warm. The room holds a quantity of heat. A heater adds heat to the room, while heat continuously leaks out to the colder outdoors. The thermostat compares the room temperature to a desired setpoint: the larger the gap, the harder the heater runs.\n\nIdentify the stock. Add the heating inflow and the heat-loss outflow, the auxiliaries (desired temperature, the temperature gap), the boundary clouds, and the information connectors that make the heater respond to the gap. This diagram combines everything from the previous three: two flows, goal-seeking control, and connector-driven rates.",
+    "expected_concepts": [
+      "The STOCK is the Heat in the room (or room temperature as the accumulation).",
+      "Heating is an INFLOW (from a cloud into the Heat stock); Heat loss is an OUTFLOW (from the Heat stock to a cloud).",
+      "Desired temperature and Temperature gap are AUXILIARIES.",
+      "INFORMATION CONNECTORS should run from the Heat stock and Desired temperature into the gap, and from the gap into the Heating flow \u2014 this closes the balancing control loop.",
+      "Heat loss depends on the room temperature, so a connector should run from the Heat stock into the Heat loss flow.",
+      "Heat is a stock; Heating and Heat loss are flows; the gap and setpoint are auxiliaries \u2014 confusing these types is the key error to catch."
+    ]
+  },
+  {
+    "id": "sfd5_epidemic",
+    "type": "sfd",
+    "title": "5 \u00b7 A Spreading Illness",
+    "difficulty": "Level 5 \u00b7 Challenging",
+    "scenario": "A mild illness spreads through a town. Healthy but susceptible people catch it through contact with people who are currently infected \u2014 so the more infected people there are, AND the more susceptible people remain, the more new infections occur each day. Infected people recover after a while and become immune, leaving the story.\n\nDraw the SFD. There are TWO stocks here, and \u2014 for the first time \u2014 a flow that runs directly from one stock into the other: catching the illness moves a person from the susceptible pool into the infected pool. Add the recovery outflow, an auxiliary for the contact/infection rate, and the information connectors that drive each flow.",
+    "expected_concepts": [
+      "There are TWO STOCKS: Susceptible people and Infected people.",
+      "Infection is a FLOW that runs FROM the Susceptible stock TO the Infected stock \u2014 a stock-to-stock flow, the key new idea in this exercise. It moves people; it is not a connector.",
+      "Recovery is an OUTFLOW from Infected to a CLOUD (recovered/immune people leave the modelled system).",
+      "Contact rate (or infectivity) is an AUXILIARY; a Recovery time auxiliary is a welcome addition.",
+      "INFORMATION CONNECTORS should run from BOTH stocks into the Infection flow (new infections need infected people to transmit and susceptible people to catch), and from the contact-rate auxiliary into the Infection flow; Infected -> Recovery as well.",
+      "The Infected -> Infection connector closes a reinforcing loop (the outbreak); the Susceptible -> Infection connector closes a balancing loop (depletion) \u2014 together they produce the epidemic's rise and fall.",
+      "Classic errors: drawing Infection as a connector instead of a flow, sending Infection from a cloud instead of from Susceptible, or making the infected count an auxiliary."
+    ]
+  },
+  {
+    "id": "sfd6_burnout",
+    "type": "sfd",
+    "title": "6 \u00b7 Project Burnout",
+    "difficulty": "Level 6 \u00b7 Advanced",
+    "scenario": "A team races to finish a project. There are two things that accumulate. First, Work remaining: it is drawn down by the team completing tasks, and pushed back up when errors create rework. Second, Fatigue: it builds up while the team works long hours and recovers slowly during rest.\n\nThe completion rate depends on how many hours the team works and on their productivity; productivity falls as fatigue rises. Long hours are themselves a response to the size of the work remaining.\n\nDraw the SFD with both stocks, the flows into and out of each, the auxiliaries (hours worked, productivity, error/rework rate), the boundary clouds, and the information connectors.",
+    "expected_concepts": [
+      "There are TWO STOCKS: Work remaining and Fatigue.",
+      "Work remaining has an OUTFLOW (Completion / task completion) and an INFLOW (Rework, from errors); Completion drains to a cloud, Rework enters from the work being redone.",
+      "Fatigue has an INFLOW (fatigue accumulation, while working long hours) and an OUTFLOW (recovery, during rest), each connecting to a cloud.",
+      "Hours worked, Productivity, and Error/rework rate are AUXILIARIES.",
+      "INFORMATION CONNECTORS: Work remaining -> Hours worked; Hours worked and Productivity -> Completion flow; Fatigue -> Productivity (productivity falls as fatigue rises); Hours worked -> Fatigue inflow; Hours worked and/or Fatigue -> Error rate -> Rework flow.",
+      "Work remaining and Fatigue are stocks; completion, rework, fatigue accumulation and recovery are flows; hours worked and productivity are auxiliaries \u2014 mixing up a stock and an auxiliary is the main mistake to flag."
+    ]
+  }
+]
