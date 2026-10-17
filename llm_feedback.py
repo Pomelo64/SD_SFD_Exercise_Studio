@@ -1,34 +1,24 @@
 """
 LLM feedback for submitted Stock and Flow Diagrams.
 
-The API key is supplied by the USER at runtime, in the app's sidebar — just
-like in CLD Tutor. It lives only in the browser session's memory
-(st.session_state) and is sent directly to the provider chosen. No secrets
-file is required (though one can optionally pre-fill the sidebar).
+The AI is a teaching assistant. When the exercise comes with an answer (a
+lecturer's file, or a set generated with its answers), it grades against that
+answer and the lecturer's notes, not against its own idea of the model. The
+built-in exercises have only a rubric (expected_concepts); there the AI uses
+the rubric and its own judgement, and can draw a model solution.
 
-Provider-agnostic (Anthropic / OpenAI), implemented with the standard
-library only — no SDK dependencies.
-
-If no key is entered, the app falls back to a local heuristic review so the
-prototype still runs and can be demoed offline.
-
-The `llm_cfg` argument used throughout is either None (no key entered) or:
-
-    {"provider": "anthropic"|"openai", "key": "<api key>", "model": "<model>"}
+Calls go through llm_client (Claude, ChatGPT or Gemini; standard library only).
+`llm_cfg` is {"provider": "anthropic"|"openai"|"gemini", "key": "...", "model": "..."}.
+If the AI cannot be reached, a basic offline review is shown with the reason.
 """
 
 import json
+import re
 import textwrap
-import urllib.error
-import urllib.request
 
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+import llm_client
 
-DEFAULT_MODELS = {
-    "anthropic": "claude-sonnet-4-6",
-    "openai": "gpt-4o-mini",
-}
+DEFAULT_MODELS = llm_client.DEFAULT_MODELS
 
 
 # --------------------------------------------------------------------------
@@ -100,20 +90,27 @@ SFD_SOLUTION_PROMPT = textwrap.dedent("""
 """).strip()
 
 
-def _build_user_message(scenario, expected_concepts, diagram):
-    concepts = "\n".join(f"- {c}" for c in expected_concepts)
-    return textwrap.dedent(f"""
-        SCENARIO
-        {scenario}
+def _build_user_message(scenario, expected_concepts, diagram, solution=None,
+                        tutor_notes="", answer_from="the lecturer"):
+    concepts = "\n".join(f"- {c}" for c in expected_concepts) or "- (none given)"
+    ref = ""
+    if solution:
+        ref = textwrap.dedent(f"""
 
-        TEACHING POINTS (what a correct answer should capture)
-        {concepts}
-
-        STUDENT'S SUBMITTED DIAGRAM (JSON)
-        {json.dumps(diagram, indent=2)}
-
-        Grade this submission now.
-    """).strip()
+            REFERENCE ANSWER (from {answer_from}; authoritative)
+            {json.dumps(solution, indent=2)}
+        """)
+    notes = f"\n\nNOTES FOR THE TUTOR (from {answer_from})\n{tutor_notes}" if tutor_notes else ""
+    how = ("Grade against the REFERENCE ANSWER and the notes: they are what this course "
+           "expects. Names need not match exactly; judge the structure and each element's "
+           "type. If the student's diagram is a sound alternative the reference does not "
+           "cover, say so, and explain how it differs from what the course expects. Never "
+           "contradict the reference answer."
+           if solution else
+           "Grade against the teaching points and your own judgement.")
+    return (f"SCENARIO\n{scenario}\n\nTEACHING POINTS (what a correct answer should "
+            f"capture)\n{concepts}{ref}{notes}\n\nSTUDENT'S SUBMITTED DIAGRAM (JSON)\n"
+            f"{json.dumps(diagram, indent=2)}\n\n{how}\nGrade this submission now.")
 
 
 def _build_solution_message(scenario, expected_concepts):
@@ -130,67 +127,18 @@ def _build_solution_message(scenario, expected_concepts):
 
 
 # --------------------------------------------------------------------------
-# Provider calls (standard library only)
+# Provider calls: the shared client
 # --------------------------------------------------------------------------
-def _post(url, headers, body):
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={**headers, "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def _call_llm(llm_cfg, system, user, max_tokens=1400):
+    text, err = llm_client.complete(llm_cfg, system, user, max_tokens=max_tokens,
+                                    want_json=True, timeout=60)
+    if err:
+        raise RuntimeError(err)
+    return text
 
 
 def _err_msg(exc):
-    """Human-readable message for an API/network failure."""
-    if isinstance(exc, urllib.error.HTTPError):
-        try:
-            detail = json.loads(exc.read().decode("utf-8"))
-            msg = (detail.get("error") or {}).get("message") or str(exc)
-        except Exception:
-            msg = str(exc)
-        return f"API error ({exc.code}): {msg}"
-    return f"Could not reach the LLM: {exc}"
-
-
-def _call_llm(llm_cfg, system, user):
-    """Send one system+user exchange to the configured provider."""
-    provider = llm_cfg["provider"]
-    api_key = llm_cfg["key"]
-    model = (llm_cfg.get("model") or "").strip() or DEFAULT_MODELS[provider]
-
-    if provider == "anthropic":
-        data = _post(
-            ANTHROPIC_URL,
-            {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-            {
-                "model": model,
-                "max_tokens": 1024,
-                "system": system,
-                "messages": [{"role": "user", "content": user}],
-            },
-        )
-        return "".join(
-            b.get("text", "") for b in data.get("content", [])
-            if b.get("type") == "text"
-        )
-
-    # openai
-    data = _post(
-        OPENAI_URL,
-        {"Authorization": f"Bearer {api_key}"},
-        {
-            "model": model,
-            "max_tokens": 1024,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        },
-    )
-    return data["choices"][0]["message"]["content"]
+    return str(exc)
 
 
 # --------------------------------------------------------------------------
@@ -228,53 +176,38 @@ def _heuristic_review(diagram):
                 + 6 * len(auxes) + 5 * len(conns)) if total else 10
     return {
         "score": score,
-        "summary": "Offline heuristic review (no API key entered).",
+        "summary": "Offline review (basic counts only).",
         "strengths": strengths or ["Diagram received."],
-        "issues": issues or ["Add your API key in the sidebar for detailed, scenario-specific feedback."],
+        "issues": issues or ["The AI tutor could not review this one; try submitting again."],
         "loops": (f"{len(stocks)} stock(s), {len(flows)} flow(s), "
                   f"{len(auxes)} auxiliary/auxiliaries detected."),
-        "next_step": "Enter an LLM API key in the sidebar to get real tutoring feedback.",
+        "next_step": "Submit again when the AI can be reached, for scenario-specific feedback.",
     }
 
 
 # --------------------------------------------------------------------------
 # Public entry points
 # --------------------------------------------------------------------------
-def get_feedback(scenario, expected_concepts, diagram, llm_cfg):
+def get_feedback(scenario, expected_concepts, diagram, llm_cfg, solution=None,
+                 tutor_notes="", answer_from="the lecturer"):
     """
-    Return structured feedback for a submitted SFD.
-
-    Parameters
-    ----------
-    scenario : str
-    expected_concepts : list[str]
-    diagram : dict           the submitted SFD payload
-                             ({"stocks", "flows", "auxiliaries", "clouds",
-                               "connectors"})
-    llm_cfg : dict or None   {"provider", "key", "model"} from the sidebar,
-                             or None when no key has been entered
-
-    Returns
-    -------
-    dict   parsed feedback (see SFD_SYSTEM_PROMPT for the shape)
+    Structured feedback for a submitted SFD (see SFD_SYSTEM_PROMPT for the
+    shape). With a `solution` (the exercise's answer), the tutor grades against
+    it and the `tutor_notes`.
     """
     if llm_cfg is None:
         return _heuristic_review(diagram)
-
-    user = _build_user_message(scenario, expected_concepts, diagram)
+    user = _build_user_message(scenario, expected_concepts, diagram, solution,
+                               tutor_notes, answer_from)
     try:
         raw = _call_llm(llm_cfg, SFD_SYSTEM_PROMPT, user)
     except Exception as exc:  # network / auth / quota — degrade gracefully
         fb = _heuristic_review(diagram)
-        fb["summary"] = f"{_err_msg(exc)} — showing offline review."
+        fb["summary"] = f"{_err_msg(exc)} — showing the offline review."
         return fb
-
-    # The model is asked for bare JSON; strip stray fences just in case.
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1].lstrip("json").strip()
+    m = re.search(r"\{.*\}", raw, re.S)
     try:
-        return json.loads(raw)
+        return json.loads(m.group(0) if m else raw)
     except json.JSONDecodeError:
         return {
             "score": None,
@@ -312,11 +245,9 @@ def get_solution(scenario, expected_concepts, llm_cfg):
         sol["_error"] = _err_msg(exc)
         return sol
 
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1].lstrip("json").strip()
+    m = re.search(r"\{.*\}", raw, re.S)
     try:
-        sol = json.loads(raw)
+        sol = json.loads(m.group(0) if m else raw)
     except json.JSONDecodeError:
         sol = _empty_solution()
         sol["_error"] = "The model's solution was not valid JSON."

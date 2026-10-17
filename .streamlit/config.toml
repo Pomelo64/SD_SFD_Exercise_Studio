@@ -1,0 +1,6 @@
+# The light theme's paper look. The dark theme is Streamlit's own; the app's
+# CSS sets no text or page colours, so both stay readable.
+[theme.light]
+backgroundColor = "#fbfaf7"
+secondaryBackgroundColor = "#f3f1ec"
+textColor = "#1e293b"

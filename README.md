@@ -1,33 +1,94 @@
 # SFD Exercise Studio — Stock & Flow Diagram practice
 
 A Streamlit app for learning the second core tool of System Dynamics: the
-**Stock and Flow Diagram (SFD)**. Six exercises of gradually increasing
-difficulty each present a written scenario; the student draws the SFD on an
-interactive canvas with typed elements, and an AI tutor reviews the
-submission — with a special eye on **type errors** (a stock drawn as an
-auxiliary, a flow drawn as a connector) — and can also draw a model solution
-to compare against.
+**Stock and Flow Diagram (SFD)**. Each exercise presents a written scenario;
+the student draws the SFD on an interactive canvas with typed elements, and an
+AI tutor reviews the submission — with a special eye on **type errors** (a
+stock drawn as an auxiliary, a flow drawn as a connector). The exercises can be
+the built-in ladder of six, a set the AI writes for a domain (chosen by the
+student or picked at random), or a set from a lecturer, with answers the AI
+grades against.
 
 Causal-loop practice lives in the companion app, **CLD Exercise Studio**.
 
-## The API key comes from the user
+## Starting: an AI key, then a choice of exercises
 
-Unlike a server-configured deployment, this app asks the **user** for their
-LLM API key, in a hideable sidebar (the same pattern as *CLD Tutor*):
+Like *Causal Loop Colab*, the app opens with **Step 1 — Connect an AI**: pick
+**Anthropic (Claude)**, **OpenAI (ChatGPT)** or **Google (Gemini)**, paste a key,
+and press **Test the key and continue**. Nothing else opens until the key works.
+The key stays in the browser session's memory and goes only to that provider. A
+deployment can also set its own key in Streamlit secrets; the app then offers
+**Use the key set for this app** (the key is tested, never shown — see
+`.streamlit/secrets.toml.example`).
 
-- pick a provider — **Anthropic (Claude)** or **OpenAI (ChatGPT)**;
-- paste an API key (password field);
-- optionally override the model name.
+**Step 2 — Choose your exercises**, from four sources:
 
-The key is kept only in the browser session's memory (`st.session_state`)
-and is sent directly to the chosen provider from the server process handling
-that session. **No secrets file is required.** Without a key, the app still
-runs: submissions get a basic offline heuristic review, and the sidebar says
-so. Each LLM review costs a fraction of a cent on the user's key.
+| | Source | What happens |
+|---|---|---|
+| 🎲 | **Let the app choose a domain** | The app picks a domain at random (a coral reef, a hospital emergency department, a city's bike-sharing scheme…) and the AI writes the exercises with their answers. |
+| 📚 | **The built-in exercises** | The six generic exercises below — the same for everyone, so the experience is reproducible. |
+| 📥 | **Import exercises from your lecturer** | A `.json` file with the exercises **and their answers**. The AI works as a teaching assistant: it grades against the lecturer's answers and notes, not its own idea of the model. |
+| ✍️ | **Choose your own domain** | The student names a domain; the AI writes the exercises with their answers. |
 
-(If you host the app and want the key field pre-filled for everyone, you can
-optionally set `anthropic_api_key` / `openai_api_key` in Streamlit secrets —
-see `.streamlit/secrets.toml.example`.)
+Generated sets have **3 exercises** (levels 1, 3 and 5 — quicker) or **6** (the full
+ladder). Each exercise is written for one level of the ladder below, with a
+scenario, teaching points, an **answer diagram** and notes for the tutor. Every
+answer is checked before it is used (each flow runs between declared stocks or
+clouds, every stock has a flow, every connector names a real element); an answer
+that fails is sent back to the AI once with the problems listed.
+
+**From then on, all sources work the same way:** read the scenario, draw the SFD,
+submit, get feedback. Feedback is written once per submission (the earlier
+version asked the AI again on every page refresh). After submitting, **Show the
+answer** reveals the set's answer diagram; for the built-in exercises, which have
+no stored answer, the AI draws one.
+
+## For lecturers: making an exercise set
+
+1. Generate a set with 🎲 or ✍️, or start from the template (**Lecturers: download
+   a template** under 📥).
+2. **Download this exercise set (.json)** from the sidebar, then review and edit it:
+   rewrite scenarios, correct answers, add your notes.
+3. Share the file. Students open it with **Import exercises from your lecturer**.
+
+The format (`bluejay-sfd-exercises`, version 1):
+
+```json
+{
+  "format": "bluejay-sfd-exercises", "version": 1,
+  "title": "Water and cities", "domain": "urban water", "author": "Dr …",
+  "reveal_answers": "after_submit",
+  "exercises": [{
+    "id": "bathtub", "title": "1 · The Bathtub", "difficulty": "Level 1 · Warm-up",
+    "scenario": "The text students read…",
+    "expected_concepts": ["The STOCK is the water in the tub.", "…"],
+    "solution": {
+      "stocks": [{"label": "Water in tub"}],
+      "flows": [{"label": "filling", "from": "tap", "to": "Water in tub"},
+                {"label": "draining", "from": "Water in tub", "to": "drain"}],
+      "auxiliaries": [], "clouds": [{"label": "tap"}, {"label": "drain"}],
+      "connectors": []},
+    "tutor_notes": "Accept any name for the stock. Insist the water is a stock."
+  }]
+}
+```
+
+- `scenario` is required; `expected_concepts` (the rubric), `solution` (the answer
+  diagram) and `tutor_notes` are optional but make the tutor follow your intent.
+  Name each element's **type** in the rubric — type confusion is what the tutor
+  checks most.
+- A flow runs `from` and `to` a stock or a cloud; a connector runs `from` any
+  element `to` a flow or auxiliary; names must match exactly.
+- `"reveal_answers": "never"` keeps the answer diagram hidden in the app (the tutor
+  still grades against it).
+- The importer explains any problem: an exercise without a scenario is skipped; an
+  answer diagram that doesn't hold together is left out, with a warning, and the
+  rubric is used instead.
+- A bare list of exercises (like `exercises/exercises.json`) is accepted too.
+
+**Be aware:** the answers travel inside the file the students import, so a student
+who opens the file can read them. The app has no server of its own to keep them
+secret; treat the set as practice material, not as an exam.
 
 ## The six exercises — a difficulty ladder
 
@@ -52,12 +113,15 @@ SFD-Exercise-Studio/
 ├── diagram_viewer/        Read-only viewer that renders the AI's solution
 │   ├── __init__.py
 │   └── frontend/index.html
-├── llm_feedback.py        Provider-agnostic LLM calls (stdlib urllib only)
-│                          + offline heuristic fallback
+├── llm_feedback.py        Tutor feedback (graded against the set's answer when there
+│                          is one) and model solutions; offline fallback
+├── llm_client.py          Claude / ChatGPT / Gemini client (standard library only)
+├── exercise_sets.py       Exercise sets: format, checks, import, export, generation
 ├── exercises/
 │   └── exercises.json     The six scenarios + grading rubrics
 ├── requirements.txt       streamlit only — no SDK dependencies
-├── .streamlit/secrets.toml.example   (optional key pre-fill; not required)
+├── .streamlit/config.toml           light-theme colours (dark theme works too)
+├── .streamlit/secrets.toml.example   (optional deployment key; not required)
 └── README.md
 ```
 
@@ -85,32 +149,19 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-That's it — no configuration. Open the sidebar in the app to add your API
-key when you want AI feedback.
+No configuration: the app asks for an AI key when it opens.
 
 ## Deploy to Streamlit Community Cloud
 
 1. Push this folder to a GitHub repository.
 2. At https://share.streamlit.io, create a new app pointing at `app.py`.
-3. Deploy. Users bring their own key via the sidebar; you don't pay for
-   their LLM calls and hold no secrets.
+3. Deploy. Users bring their own key; you don't pay for their AI calls and hold
+   no secrets. (Optionally, set a key in **App → Settings → Secrets** for a
+   "Use the key set for this app" button.)
 
-## Adding exercises
+## Adding exercises to the built-in set
 
-Append an object to `exercises/exercises.json`:
-
-```json
-{
-  "id": "sfd_unique_id",
-  "type": "sfd",
-  "title": "7 · Your Title",
-  "difficulty": "Level 7 · …",
-  "scenario": "The written scenario the student reads...",
-  "expected_concepts": ["Teaching point 1", "Teaching point 2"]
-}
-```
-
-`expected_concepts` is the rubric the LLM grades against — it is sent to the
-model but never shown to the student. State the expected **type** of each
-element (stock vs flow vs auxiliary), since type confusion is the main thing
-the tutor checks.
+Append an object to `exercises/exercises.json` in the format above (`id`, `title`,
+`difficulty`, `scenario`, `expected_concepts`, and optionally `solution` and
+`tutor_notes`). To give students a different set without changing the app, share a
+file instead (see *For lecturers*).
